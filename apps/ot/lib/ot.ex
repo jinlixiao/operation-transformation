@@ -17,7 +17,9 @@ defmodule OT do
     # The current document state.
     document: nil,
     # The current vector clock.
-    clock: nil
+    clock: nil,
+    # history buffer keeping track of all executed operations.
+    hb: nil
   )
 
   @spec new_configuration([atom()]) :: %OT{}
@@ -25,7 +27,8 @@ defmodule OT do
     %OT{
       view: view,
       document: "",
-      clock: Map.new(view, fn x -> {x, 0} end)
+      clock: Map.new(view, fn x -> {x, 0} end),
+      hb: []
     }
   end
 
@@ -64,6 +67,32 @@ defmodule OT do
     %OT{configuration | clock: Map.update(configuration.clock, me, 0, &(&1 + 1))}
   end
 
+  # Combine vector clocks.
+  defp combine_clock(configuration, clock) do
+    %OT{
+      configuration
+      | clock: Map.merge(configuration.clock, clock, fn _k, v1, v2 -> max(v1, v2) end)
+    }
+  end
+
+  defp get_casuality(configuration, clock) do
+    happen_before? =
+      Enum.all?(Map.keys(configuration.clock), fn x ->
+        Map.get(configuration.clock, x) <= Map.get(clock, x)
+      end)
+
+    happen_after? =
+      Enum.all?(Map.keys(clock), fn x ->
+        Map.get(configuration.clock, x) >= Map.get(clock, x)
+      end)
+
+    cond do
+      happen_before? -> :happen_before
+      happen_after? -> :happen_after
+      true -> :independent
+    end
+  end
+
   @doc """
   Main Event Listener.
   """
@@ -71,33 +100,61 @@ defmodule OT do
   def loop(configuration) do
     receive do
       # Messages from editor cleints.
-      {_sender, {:insert_client, text, index}} ->
-        IO.puts("Received insert from client")
-        broadcast(configuration, {:insert, text, index})
+      {_sender, {:insert_client, text, index, clock}} ->
+        IO.puts(
+          "#{whoami()}: Received insert req from client, inserting #{text} at index #{index}"
+        )
+
+        configuration = tick(configuration)
+        configuration = combine_clock(configuration, clock)
+        IO.puts("#{whoami()}: Clock is now #{inspect(configuration.clock)}")
+        broadcast(configuration, {:insert, text, index, configuration.clock})
         configuration = insert(configuration, text, index)
         loop(configuration)
 
-      {_sender, {:delete_client, index}} ->
-        IO.puts("Received delete from client")
-        broadcast(configuration, {:delete, index})
+      {_sender, {:delete_client, index, clock}} ->
+        IO.puts("#{whoami()}: Received delete req from client, deleting at index #{index}")
+        configuration = tick(configuration)
+        configuration = combine_clock(configuration, clock)
+        IO.puts("#{whoami()}: Clock is now #{inspect(configuration.clock)}")
+        broadcast(configuration, {:delete, index, configuration.clock})
         configuration = delete(configuration, index)
         loop(configuration)
 
       # Messages from other processes.
-      {_sender, {:insert, text, index}} ->
-        IO.puts("Received insert")
+      {sender, {:insert, text, index, clock}} ->
+        IO.puts(
+          "#{whoami()}: Received insert req from #{sender}, inserting '#{text}' at index #{index}"
+        )
+
+        configuration = tick(configuration)
+        configuration = combine_clock(configuration, clock)
+        IO.puts("#{whoami()}: Clock is now #{inspect(configuration.clock)}")
         configuration = insert(configuration, text, index)
         loop(configuration)
 
-      {_sender, {:delete, index}} ->
-        IO.puts("Received delete")
+      {sender, {:delete, index, clock}} ->
+        IO.puts("#{whoami()}: Received delete req from #{sender}, deleting at index #{index}")
+        configuration = tick(configuration)
+        configuration = combine_clock(configuration, clock)
+        IO.puts("#{whoami()}: Clock is now #{inspect(configuration.clock)}")
         configuration = delete(configuration, index)
         loop(configuration)
 
       # Messages for debugging
       {sender, :send_document} ->
-        IO.puts("Sending document")
+        IO.puts("#{whoami()}: Sending document")
         send(sender, configuration.document)
+        loop(configuration)
+
+      {sender, :send_clock} ->
+        IO.puts("#{whoami()}: Sending clock")
+        send(sender, configuration.clock)
+        loop(configuration)
+
+      {sender, :send_state} ->
+        IO.puts("#{whoami()}: Sending state")
+        send(sender, {configuration.document, configuration.clock})
         loop(configuration)
     end
   end
@@ -129,16 +186,14 @@ defmodule OT.Client do
   @doc """
   Send a insert request to the Editor.
   """
-  @spec insert(atom | %{:editor => atom | pid, optional(any) => any}, any, any) :: boolean
-  def insert(client, text, index) do
-    send(client.editor, {:insert_client, text, index})
+  def insert(client, text, index, clock) do
+    send(client.editor, {:insert_client, text, index, clock})
   end
 
   @doc """
   Send a delete request to the Editor.
   """
-  @spec delete(atom | %{:editor => atom | pid, optional(any) => any}, any) :: boolean
-  def delete(client, index) do
-    send(client.editor, {:delete_client, index})
+  def delete(client, index, clock) do
+    send(client.editor, {:delete_client, index, clock})
   end
 end

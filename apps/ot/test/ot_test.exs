@@ -21,9 +21,9 @@ defmodule OTTest do
       spawn(:client, fn ->
         view = [:a, :b, :c]
         client_a = OT.Client.new_client(:a)
-        OT.Client.insert(client_a, "a", 0)
-        OT.Client.insert(client_a, "b", 1)
-        OT.Client.insert(client_a, "c", 0)
+        OT.Client.insert(client_a, "a", 0, Map.new(view, fn x -> {x, 0} end))
+        OT.Client.insert(client_a, "b", 1, Map.new(view, fn x -> {x, 0} end))
+        OT.Client.insert(client_a, "c", 0, Map.new(view, fn x -> {x, 0} end))
 
         Process.sleep(1000)
         view |> Enum.map(fn x -> send(x, :send_document) end)
@@ -38,8 +38,8 @@ defmodule OTTest do
 
         assert Enum.all?(documents, fn x -> x == "cab" end)
 
-        OT.Client.delete(client_a, 0)
-        OT.Client.delete(client_a, 1)
+        OT.Client.delete(client_a, 0, Map.new(view, fn x -> {x, 0} end))
+        OT.Client.delete(client_a, 1, Map.new(view, fn x -> {x, 0} end))
 
         Process.sleep(1000)
         view |> Enum.map(fn x -> send(x, :send_document) end)
@@ -82,9 +82,9 @@ defmodule OTTest do
         client_a = OT.Client.new_client(:a)
         client_b = OT.Client.new_client(:b)
         client_c = OT.Client.new_client(:c)
-        OT.Client.insert(client_a, "a", 0)
-        OT.Client.insert(client_b, "a", 0)
-        OT.Client.insert(client_c, "a", 0)
+        OT.Client.insert(client_a, "a", 0, Map.new(view, fn x -> {x, 0} end))
+        OT.Client.insert(client_b, "a", 0, Map.new(view, fn x -> {x, 0} end))
+        OT.Client.insert(client_c, "a", 0, Map.new(view, fn x -> {x, 0} end))
 
         Process.sleep(1000)
         view |> Enum.map(fn x -> send(x, :send_document) end)
