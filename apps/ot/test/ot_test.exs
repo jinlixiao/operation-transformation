@@ -7,11 +7,7 @@ defmodule OTTest do
   import Kernel,
     except: [spawn: 3, spawn: 1, spawn_link: 1, spawn_link: 3, send: 2]
 
-  test "greets the world" do
-    assert OT.hello() == :world
-  end
-
-  test "basic increment" do
+  test "basic insert and delete" do
     Emulation.init()
     Emulation.append_fuzzers([Fuzzers.delay(2)])
 
@@ -23,13 +19,40 @@ defmodule OTTest do
 
     client =
       spawn(:client, fn ->
-        client = OT.Client.new_client(:a)
-        OT.Client.inc(client)
-        send(:a, :send_count)
+        view = [:a, :b, :c]
+        client_a = OT.Client.new_client(:a)
+        OT.Client.insert(client_a, "a", 0)
+        OT.Client.insert(client_a, "b", 1)
+        OT.Client.insert(client_a, "c", 0)
 
-        receive do
-          {sender, count} -> assert count == 1
-        end
+        Process.sleep(1000)
+        view |> Enum.map(fn x -> send(x, :send_document) end)
+
+        documents =
+          view
+          |> Enum.map(fn x ->
+            receive do
+              {^x, document} -> document
+            end
+          end)
+
+        assert Enum.all?(documents, fn x -> x == "cab" end)
+
+        OT.Client.delete(client_a, 0)
+        OT.Client.delete(client_a, 1)
+
+        Process.sleep(1000)
+        view |> Enum.map(fn x -> send(x, :send_document) end)
+
+        documents =
+          view
+          |> Enum.map(fn x ->
+            receive do
+              {^x, document} -> document
+            end
+          end)
+
+        assert Enum.all?(documents, fn x -> x == "a" end)
       end)
 
     handle = Process.monitor(client)
@@ -43,7 +66,7 @@ defmodule OTTest do
     Emulation.terminate()
   end
 
-  test "basic increment with broadcast" do
+  test "basic insert with broadcast" do
     Emulation.init()
     Emulation.append_fuzzers([Fuzzers.delay(2)])
 
@@ -59,23 +82,22 @@ defmodule OTTest do
         client_a = OT.Client.new_client(:a)
         client_b = OT.Client.new_client(:b)
         client_c = OT.Client.new_client(:c)
-        OT.Client.inc(client_a)
-        OT.Client.inc(client_b)
-        OT.Client.inc(client_a)
-        OT.Client.inc(client_c)
+        OT.Client.insert(client_a, "a", 0)
+        OT.Client.insert(client_b, "a", 0)
+        OT.Client.insert(client_c, "a", 0)
 
         Process.sleep(1000)
-        view |> Enum.map(fn x -> send(x, :send_count) end)
+        view |> Enum.map(fn x -> send(x, :send_document) end)
 
-        counts =
+        documents =
           view
           |> Enum.map(fn x ->
             receive do
-              {^x, count} -> count
+              {^x, document} -> document
             end
           end)
 
-        assert Enum.all?(counts, fn x -> x == 4 end)
+        assert Enum.all?(documents, fn x -> x == "aaa" end)
       end)
 
     handle = Process.monitor(client)

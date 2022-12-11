@@ -35,6 +35,24 @@ defmodule OT do
     %OT{configuration | count: count + 1}
   end
 
+  # Insert a string at a given index.
+  # Here we use a naive implementation of string concatenation.
+  @spec insert(%OT{}, String.t(), integer()) :: %OT{}
+  defp insert(%OT{document: document} = configuration, text, index) do
+    {head, tail} = String.split_at(document, index)
+    res = head <> text <> tail
+    %OT{configuration | document: res}
+  end
+
+  # Delete a character at a given index.
+  # Here we use a naive implementation of string concatenation.
+  @spec delete(%OT{}, integer()) :: %OT{}
+  defp delete(%OT{document: document} = configuration, index) do
+    {head, tail} = String.split_at(document, index)
+    res = head <> String.slice(tail, 1..String.length(tail)//1)
+    %OT{configuration | document: res}
+  end
+
   # Broadcast a message to all processes in the view.
   @spec broadcast(%OT{}, any()) :: [boolean()]
   defp broadcast(configuration, message) do
@@ -51,7 +69,7 @@ defmodule OT do
   @spec loop(%OT{}) :: no_return()
   def loop(configuration) do
     receive do
-      {sender, {:inc, editor}} ->
+      {_sender, {:inc, editor}} ->
         IO.puts("Received incrementing count")
 
         if whoami() == editor do
@@ -59,6 +77,26 @@ defmodule OT do
         end
 
         configuration = inc(configuration)
+        loop(configuration)
+
+      {_sender, {:insert, editor, text, index}} ->
+        IO.puts("Received insert")
+
+        if whoami() == editor do
+          broadcast(configuration, {:insert, editor, text, index})
+        end
+
+        configuration = insert(configuration, text, index)
+        loop(configuration)
+
+      {_sender, {:delete, editor, index}} ->
+        IO.puts("Received delete")
+
+        if whoami() == editor do
+          broadcast(configuration, {:delete, editor, index})
+        end
+
+        configuration = delete(configuration, index)
         loop(configuration)
 
       {sender, :get} ->
@@ -119,8 +157,24 @@ defmodule OT.Client do
   @doc """
   Send a increment counter request to the Editor.
   """
-  @spec inc(%Client{}) :: {:ok, %Client{}}
+  @spec inc(%Client{}) :: any()
   def inc(client) do
     send(client.editor, {:inc, client.editor})
+  end
+
+  @doc """
+  Send a insert request to the Editor.
+  """
+  @spec insert(atom | %{:editor => atom | pid, optional(any) => any}, any, any) :: boolean
+  def insert(client, text, index) do
+    send(client.editor, {:insert, client.editor, text, index})
+  end
+
+  @doc """
+  Send a delete request to the Editor.
+  """
+  @spec delete(atom | %{:editor => atom | pid, optional(any) => any}, any) :: boolean
+  def delete(client, index) do
+    send(client.editor, {:delete, client.editor, index})
   end
 end
