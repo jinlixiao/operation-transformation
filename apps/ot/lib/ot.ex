@@ -70,23 +70,27 @@ defmodule OT do
   @spec loop(%OT{}) :: no_return()
   def loop(configuration) do
     receive do
-      {_sender, {:insert, editor, text, index}} ->
-        IO.puts("Received insert")
-
-        if whoami() == editor do
-          broadcast(configuration, {:insert, editor, text, index})
-        end
-
+      # Messages from editor cleints.
+      {_sender, {:insert_client, text, index}} ->
+        IO.puts("Received insert from client")
+        broadcast(configuration, {:insert, text, index})
         configuration = insert(configuration, text, index)
         loop(configuration)
 
-      {_sender, {:delete, editor, index}} ->
+      {_sender, {:delete_client, index}} ->
+        IO.puts("Received delete from client")
+        broadcast(configuration, {:delete, index})
+        configuration = delete(configuration, index)
+        loop(configuration)
+
+      # Messages from other processes.
+      {_sender, {:insert, text, index}} ->
+        IO.puts("Received insert")
+        configuration = insert(configuration, text, index)
+        loop(configuration)
+
+      {_sender, {:delete, index}} ->
         IO.puts("Received delete")
-
-        if whoami() == editor do
-          broadcast(configuration, {:delete, editor, index})
-        end
-
         configuration = delete(configuration, index)
         loop(configuration)
 
@@ -127,7 +131,7 @@ defmodule OT.Client do
   """
   @spec insert(atom | %{:editor => atom | pid, optional(any) => any}, any, any) :: boolean
   def insert(client, text, index) do
-    send(client.editor, {:insert, client.editor, text, index})
+    send(client.editor, {:insert_client, text, index})
   end
 
   @doc """
@@ -135,6 +139,6 @@ defmodule OT.Client do
   """
   @spec delete(atom | %{:editor => atom | pid, optional(any) => any}, any) :: boolean
   def delete(client, index) do
-    send(client.editor, {:delete, client.editor, index})
+    send(client.editor, {:delete_client, index})
   end
 end
