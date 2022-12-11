@@ -14,25 +14,19 @@ defmodule OT do
   defstruct(
     # The list of current proceses.
     view: nil,
-    # The current count.
-    count: nil,
     # The current document state.
-    document: nil
+    document: nil,
+    # The current vector clock.
+    clock: nil
   )
 
   @spec new_configuration([atom()]) :: %OT{}
   def new_configuration(view) do
     %OT{
       view: view,
-      count: 0,
-      document: ""
+      document: "",
+      clock: Map.new(view, fn x -> {x, 0} end)
     }
-  end
-
-  # Increment the count.
-  @spec inc(%OT{}) :: %OT{}
-  defp inc(%OT{count: count} = configuration) do
-    %OT{configuration | count: count + 1}
   end
 
   # Insert a string at a given index.
@@ -63,22 +57,19 @@ defmodule OT do
     |> Enum.map(fn x -> send(x, message) end)
   end
 
+  # Update clock value.
+  @spec tick(%OT{}) :: %OT{}
+  defp tick(configuration) do
+    me = whoami()
+    %OT{configuration | clock: Map.update(configuration.clock, me, 0, &(&1 + 1))}
+  end
+
   @doc """
   Main Event Listener.
   """
   @spec loop(%OT{}) :: no_return()
   def loop(configuration) do
     receive do
-      {_sender, {:inc, editor}} ->
-        IO.puts("Received incrementing count")
-
-        if whoami() == editor do
-          broadcast(configuration, {:inc, editor})
-        end
-
-        configuration = inc(configuration)
-        loop(configuration)
-
       {_sender, {:insert, editor, text, index}} ->
         IO.puts("Received insert")
 
@@ -99,35 +90,12 @@ defmodule OT do
         configuration = delete(configuration, index)
         loop(configuration)
 
-      {sender, :get} ->
-        IO.puts("Getting count")
-        send(sender, configuration.count)
-        loop(configuration)
-
       # Messages for debugging
       {sender, :send_document} ->
         IO.puts("Sending document")
         send(sender, configuration.document)
         loop(configuration)
-
-      {sender, :send_count} ->
-        IO.puts("Sending count, #{configuration.count}")
-        send(sender, configuration.count)
-        loop(configuration)
     end
-  end
-
-  @doc """
-  Hello world.
-
-  ## Examples
-
-      iex> OT.hello()
-      :world
-
-  """
-  def hello do
-    :world
   end
 end
 
@@ -152,14 +120,6 @@ defmodule OT.Client do
   @spec new_client(atom()) :: %Client{editor: atom()}
   def new_client(proc) do
     %Client{editor: proc}
-  end
-
-  @doc """
-  Send a increment counter request to the Editor.
-  """
-  @spec inc(%Client{}) :: any()
-  def inc(client) do
-    send(client.editor, {:inc, client.editor})
   end
 
   @doc """
