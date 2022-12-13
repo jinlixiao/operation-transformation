@@ -196,22 +196,21 @@ defmodule OT do
   #  2. DO op
   #  3. REDO all operations that were undone from HB
   defp undo_redo_op(document, hb, op) do
+    hb_redo = Enum.filter(hb, fn op2 -> !total_before_op?(op2, op) end)
+    hb_preserve = Enum.filter(hb, fn op2 -> total_before_op?(op2, op) end)
+    undo_redo_op_helper(document, hb_redo, op, hb_preserve)
+  end
+
+  defp undo_redo_op_helper(document, hb, op, hb_preserve) do
     cond do
       hb == [] ->
         {document, op} = do_op(document, op)
-        {document, [op | hb]}
-
-      total_before_op?(hd(hb), op) ->
-        op2 = hd(hb)
-        {document, new_hb} = undo_redo_op(document, tl(hb), op)
-        {document, [op2 | new_hb]}
+        {document, [op | hb_preserve]}
 
       true ->
         op2 = hd(hb)
-        IO.puts("#{whoami()}: Undoing #{inspect(op2)}")
         {document, op2} = undo_op(document, op2)
         {document, new_hb} = undo_redo_op(document, tl(hb), op)
-        IO.puts("#{whoami()}: Redoing #{inspect(op2)}")
         {document, op2} = do_op(document, op2)
         {document, [op2 | new_hb]}
     end
@@ -219,9 +218,9 @@ defmodule OT do
 
   # Execute an insert operation. The operation needed to be causally ready.
   defp exec_insert(configuration, clock, site, text, index) do
-    # IO.puts(
-    "#{whoami()}: Executing insert '#{text}' at index #{index} with clock #{inspect(clock)}"
-    # )
+    IO.puts(
+      "#{whoami()}: Executing insert '#{text}' at index #{index} with clock #{inspect(clock)}"
+    )
 
     {document, hb} =
       undo_redo_op(configuration.document, configuration.hb, {clock, site, :insert, text, index})
