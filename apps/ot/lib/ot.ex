@@ -145,24 +145,99 @@ defmodule OT do
     %OT{configuration | hb: [op | configuration.hb]}
   end
 
-  # Starting executing an insert operation. The operation needed to be causally ready.
-  defp do_insert(configuration, clock, site, text, index) do
-    IO.puts(
-      "#{whoami()}: Executing insert '#{text}' at index #{index} with clock #{inspect(clock)}"
-    )
+  # The following functions deals with `op`, which is a tuple of the form:
+  #  {clock, site, operation, text, index}
+  #  - clock      (index 0): the vector clock of the operation; a map.
+  #  - site       (index 1): the site that generated the operation; an atom.
+  #  - operation  (index 2): the operation type, either :insert or :delete.
+  #  - text       (index 3): the text of the operation; a string.
+  #  - index      (index 4): the index of the operation; an integer.
+  # op is also stored in the History Buffer (hb). So for :delete operations,
+  # text is the deleted character. Note that for :insert operations, text is
+  # the inserted text (non-modifiable).
 
-    document = insert(configuration.document, text, index)
-    configuration = %OT{configuration | document: document}
-    configuration = hb_add(configuration, {clock, site, :insert, text, index})
+  # Do an operation on a document.
+  # Returns the new document and the operation.
+  # If the operation is a :delete operation, the deleted character is stored.
+  @spec do_op(String.t(), any()) :: {String.t(), any()}
+  defp do_op(document, op) do
+    case elem(op, 2) do
+      :insert ->
+        {insert(document, elem(op, 3), elem(op, 4)), op}
+
+      :delete ->
+        {document, deleted} = delete(document, elem(op, 4))
+        {document, put_elem(op, 3, deleted)}
+    end
+  end
+
+  # Undo an operation on a document.
+  # Returns the new document and the operation.
+  @spec undo_op(String.t(), any()) :: {String.t(), any()}
+  defp undo_op(document, op) do
+    case elem(op, 2) do
+      :insert ->
+        {document, _} = delete(document, elem(op, 4))
+        {document, op}
+
+      :delete ->
+        {insert(document, elem(op, 3), elem(op, 4)), op}
+    end
+  end
+
+  # Return true if op1 is totally before op2, false otherwise
+  defp total_before_op?(op1, op2) do
+    get_total_order(elem(op1, 0), elem(op1, 1), elem(op2, 0), elem(op2, 1)) == :before
+  end
+
+  # The Undo/Redo algorithm. When a new operation op is causally ready,
+  # the following steps are executed:
+  #  1. UNDO operations in HB which totally follow op to restore the document before their execution
+  #  2. DO op
+  #  3. REDO all operations that were undone from HB
+  defp undo_redo_op(document, hb, op) do
+    cond do
+      hb == [] ->
+        {document, op} = do_op(document, op)
+        {document, [op | hb]}
+
+      total_before_op?(hd(hb), op) ->
+        op2 = hd(hb)
+        {document, new_hb} = undo_redo_op(document, tl(hb), op)
+        {document, [op2 | new_hb]}
+
+      true ->
+        op2 = hd(hb)
+        IO.puts("#{whoami()}: Undoing #{inspect(op2)}")
+        {document, op2} = undo_op(document, op2)
+        {document, new_hb} = undo_redo_op(document, tl(hb), op)
+        IO.puts("#{whoami()}: Redoing #{inspect(op2)}")
+        {document, op2} = do_op(document, op2)
+        {document, [op2 | new_hb]}
+    end
+  end
+
+  # Execute an insert operation. The operation needed to be causally ready.
+  defp exec_insert(configuration, clock, site, text, index) do
+    # IO.puts(
+    "#{whoami()}: Executing insert '#{text}' at index #{index} with clock #{inspect(clock)}"
+    # )
+
+    {document, hb} =
+      undo_redo_op(configuration.document, configuration.hb, {clock, site, :insert, text, index})
+
+    configuration = %OT{configuration | document: document, hb: hb}
     tick(configuration, site)
   end
 
-  # Starting executing a delete operation. The operation needed to be causally ready.
-  defp do_delete(configuration, clock, site, index) do
+  # Execute a delete operation. The operation needed to be causally ready.
+  defp exec_delete(configuration, clock, site, index) do
     IO.puts("#{whoami()}: Executing delete at index #{index} with clock #{inspect(clock)}")
-    {document, text} = delete(configuration.document, index)
-    configuration = %OT{configuration | document: document}
-    configuration = hb_add(configuration, {clock, site, :delete, text, index})
+
+    {document, hb} =
+      undo_redo_op(configuration.document, configuration.hb, {clock, site, :delete, "", index})
+
+    configuration = %OT{configuration | document: document, hb: hb}
     tick(configuration, site)
   end
 
@@ -191,14 +266,14 @@ defmodule OT do
         )
 
         op_clock = gen_insert(configuration, text, index)
-        configuration = do_insert(configuration, op_clock, whoami(), text, index)
+        configuration = exec_insert(configuration, op_clock, whoami(), text, index)
         loop(configuration)
 
       {_sender, {:delete_client, index, _clock}} ->
         IO.puts("#{whoami()}: Received delete req from client, deleting at index #{index}")
 
         op_clock = gen_delete(configuration, index)
-        configuration = do_delete(configuration, op_clock, whoami(), index)
+        configuration = exec_delete(configuration, op_clock, whoami(), index)
         loop(configuration)
 
       # Messages from other processes.
@@ -208,7 +283,7 @@ defmodule OT do
         )
 
         if casually_ready?(configuration, clock, site) do
-          configuration = do_insert(configuration, clock, site, text, index)
+          configuration = exec_insert(configuration, clock, site, text, index)
           loop(configuration)
         else
           send(whoami(), {:insert, clock, site, text, index})
@@ -221,7 +296,7 @@ defmodule OT do
         )
 
         if casually_ready?(configuration, clock, site) do
-          configuration = do_delete(configuration, clock, site, index)
+          configuration = exec_delete(configuration, clock, site, index)
           loop(configuration)
         else
           send(whoami(), {:delete, clock, site, index})
