@@ -34,20 +34,20 @@ defmodule OT do
 
   # Insert a string at a given index.
   # Here we use a naive implementation of string concatenation.
-  @spec insert(%OT{}, String.t(), integer()) :: %OT{}
-  defp insert(%OT{document: document} = configuration, text, index) do
+  @spec insert(String.t(), String.t(), integer()) :: String.t()
+  defp insert(document, text, index) do
     {head, tail} = String.split_at(document, index)
     res = head <> text <> tail
-    %OT{configuration | document: res}
+    res
   end
 
   # Delete a character at a given index.
   # Here we use a naive implementation of string concatenation.
-  @spec delete(%OT{}, integer()) :: {%OT{}, String.t()}
-  defp delete(%OT{document: document} = configuration, index) do
+  @spec delete(String.t(), integer()) :: {String.t(), String.t()}
+  defp delete(document, index) do
     {head, tail} = String.split_at(document, index)
     res = head <> String.slice(tail, 1..String.length(tail)//1)
-    {%OT{configuration | document: res}, String.at(tail, 0)}
+    {res, String.at(tail, 0)}
   end
 
   # Broadcast a message to all processes in the view.
@@ -151,7 +151,8 @@ defmodule OT do
       "#{whoami()}: Executing insert '#{text}' at index #{index} with clock #{inspect(clock)}"
     )
 
-    configuration = insert(configuration, text, index)
+    document = insert(configuration.document, text, index)
+    configuration = %OT{configuration | document: document}
     configuration = hb_add(configuration, {clock, site, :insert, text, index})
     tick(configuration, site)
   end
@@ -159,7 +160,8 @@ defmodule OT do
   # Starting executing a delete operation. The operation needed to be causally ready.
   defp do_delete(configuration, clock, site, index) do
     IO.puts("#{whoami()}: Executing delete at index #{index} with clock #{inspect(clock)}")
-    {configuration, text} = delete(configuration, index)
+    {document, text} = delete(configuration.document, index)
+    configuration = %OT{configuration | document: document}
     configuration = hb_add(configuration, {clock, site, :delete, text, index})
     tick(configuration, site)
   end
