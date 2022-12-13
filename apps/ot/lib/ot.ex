@@ -43,11 +43,11 @@ defmodule OT do
 
   # Delete a character at a given index.
   # Here we use a naive implementation of string concatenation.
-  @spec delete(%OT{}, integer()) :: %OT{}
+  @spec delete(%OT{}, integer()) :: {%OT{}, String.t()}
   defp delete(%OT{document: document} = configuration, index) do
     {head, tail} = String.split_at(document, index)
     res = head <> String.slice(tail, 1..String.length(tail)//1)
-    %OT{configuration | document: res}
+    {%OT{configuration | document: res}, String.at(tail, 0)}
   end
 
   # Broadcast a message to all processes in the view.
@@ -60,11 +60,10 @@ defmodule OT do
     |> Enum.map(fn x -> send(x, message) end)
   end
 
-  # Update clock value.
-  @spec tick(%OT{}) :: %OT{}
-  defp tick(configuration) do
-    me = whoami()
-    %OT{configuration | clock: Map.update(configuration.clock, me, 0, &(&1 + 1))}
+  # Update clock value for a given site.
+  @spec tick(%OT{}, atom()) :: %OT{}
+  defp tick(configuration, site) do
+    %OT{configuration | clock: Map.update(configuration.clock, site, 0, &(&1 + 1))}
   end
 
   # Combine vector clocks.
@@ -75,22 +74,55 @@ defmodule OT do
     }
   end
 
-  defp get_casuality(configuration, clock) do
-    happen_before? =
-      Enum.all?(Map.keys(configuration.clock), fn x ->
-        Map.get(configuration.clock, x) <= Map.get(clock, x)
-      end)
+  # Check if an received operation is ready to be executed.
+  #  * configuration: the current configuration.
+  #  * clock: the clock of the received operation.
+  #  * site: the generation site of the received operation.
+  @spec casually_ready?(%OT{}, map(), atom()) :: boolean()
+  defp casually_ready?(configuration, clock, site) do
+    configuration.clock[site] + 1 == clock[site] and
+      configuration.view
+      |> Enum.filter(fn x -> x != site end)
+      |> Enum.all?(fn x -> configuration.clock[x] >= clock[x] end)
+  end
 
-    happen_after? =
-      Enum.all?(Map.keys(clock), fn x ->
-        Map.get(configuration.clock, x) >= Map.get(clock, x)
-      end)
+  # Add an operation to the history buffer.
+  #  * configuration: the current configuration.
+  #  * op: the operation tuple
+  @spec hb_add(%OT{}, any()) :: %OT{}
+  defp hb_add(configuration, op) do
+    %OT{configuration | hb: [op | configuration.hb]}
+  end
 
-    cond do
-      happen_before? -> :happen_before
-      happen_after? -> :happen_after
-      true -> :independent
-    end
+  # Starting executing an insert operation. The operation needed to be causally ready.
+  defp do_insert(configuration, clock, site, text, index) do
+    IO.puts(
+      "#{whoami()}: Executing insert '#{text}' at index #{index} with clock #{inspect(clock)}"
+    )
+
+    configuration = insert(configuration, text, index)
+    configuration = hb_add(configuration, {clock, site, :insert, text, index})
+    tick(configuration, site)
+  end
+
+  # Starting executing a delete operation. The operation needed to be causally ready.
+  defp do_delete(configuration, clock, site, index) do
+    IO.puts("#{whoami()}: Executing delete at index #{index} with clock #{inspect(clock)}")
+    {configuration, text} = delete(configuration, index)
+    configuration = hb_add(configuration, {clock, site, :delete, text, index})
+    tick(configuration, site)
+  end
+
+  defp gen_insert(configuration, text, index) do
+    op_clock = tick(configuration, whoami()).clock
+    broadcast(configuration, {:insert, op_clock, whoami(), text, index})
+    op_clock
+  end
+
+  defp gen_delete(configuration, index) do
+    op_clock = tick(configuration, whoami()).clock
+    broadcast(configuration, {:delete, op_clock, whoami(), index})
+    op_clock
   end
 
   @doc """
@@ -100,60 +132,62 @@ defmodule OT do
   def loop(configuration) do
     receive do
       # Messages from editor cleints.
-      {_sender, {:insert_client, text, index, clock}} ->
+      {_sender, {:insert_client, text, index, _clock}} ->
         IO.puts(
           "#{whoami()}: Received insert req from client, inserting #{text} at index #{index}"
         )
 
-        configuration = tick(configuration)
-        configuration = combine_clock(configuration, clock)
-        IO.puts("#{whoami()}: Clock is now #{inspect(configuration.clock)}")
-        broadcast(configuration, {:insert, text, index, configuration.clock})
-        configuration = insert(configuration, text, index)
+        op_clock = gen_insert(configuration, text, index)
+        configuration = do_insert(configuration, op_clock, whoami(), text, index)
         loop(configuration)
 
-      {_sender, {:delete_client, index, clock}} ->
+      {_sender, {:delete_client, index, _clock}} ->
         IO.puts("#{whoami()}: Received delete req from client, deleting at index #{index}")
-        configuration = tick(configuration)
-        configuration = combine_clock(configuration, clock)
-        IO.puts("#{whoami()}: Clock is now #{inspect(configuration.clock)}")
-        broadcast(configuration, {:delete, index, configuration.clock})
-        configuration = delete(configuration, index)
+
+        op_clock = gen_delete(configuration, index)
+        configuration = do_delete(configuration, op_clock, whoami(), index)
         loop(configuration)
 
       # Messages from other processes.
-      {sender, {:insert, text, index, clock}} ->
+      {sender, {:insert, clock, site, text, index}} ->
         IO.puts(
-          "#{whoami()}: Received insert req from #{sender}, inserting '#{text}' at index #{index}"
+          "#{whoami()}: Received insert req from #{sender}, inserting '#{text}' at index #{index} with SV #{inspect(clock)}"
         )
 
-        configuration = tick(configuration)
-        configuration = combine_clock(configuration, clock)
-        IO.puts("#{whoami()}: Clock is now #{inspect(configuration.clock)}")
-        configuration = insert(configuration, text, index)
-        loop(configuration)
+        if casually_ready?(configuration, clock, site) do
+          configuration = do_insert(configuration, clock, site, text, index)
+          loop(configuration)
+        else
+          send(whoami(), {:insert, clock, site, text, index})
+          loop(configuration)
+        end
 
-      {sender, {:delete, index, clock}} ->
-        IO.puts("#{whoami()}: Received delete req from #{sender}, deleting at index #{index}")
-        configuration = tick(configuration)
-        configuration = combine_clock(configuration, clock)
-        IO.puts("#{whoami()}: Clock is now #{inspect(configuration.clock)}")
-        configuration = delete(configuration, index)
-        loop(configuration)
+      {sender, {:delete, clock, site, index}} ->
+        IO.puts(
+          "#{whoami()}: Received delete req from #{sender}, deleting at index #{index} with SV #{inspect(clock)}"
+        )
+
+        if casually_ready?(configuration, clock, site) do
+          configuration = do_delete(configuration, clock, site, index)
+          loop(configuration)
+        else
+          send(whoami(), {:delete, clock, site, index})
+          loop(configuration)
+        end
 
       # Messages for debugging
       {sender, :send_document} ->
-        IO.puts("#{whoami()}: Sending document")
+        IO.puts("#{whoami()}: Sending document...")
         send(sender, configuration.document)
         loop(configuration)
 
       {sender, :send_clock} ->
-        IO.puts("#{whoami()}: Sending clock")
+        IO.puts("#{whoami()}: Sending clock...")
         send(sender, configuration.clock)
         loop(configuration)
 
       {sender, :send_state} ->
-        IO.puts("#{whoami()}: Sending state")
+        IO.puts("#{whoami()}: Sending state...")
         send(sender, {configuration.document, configuration.clock})
         loop(configuration)
     end
