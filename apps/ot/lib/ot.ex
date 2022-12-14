@@ -196,16 +196,10 @@ defmodule OT do
   #  2. DO op
   #  3. REDO all operations that were undone from HB
   defp undo_redo_op(document, hb, op) do
-    hb_redo = Enum.filter(hb, fn op2 -> !total_before_op?(op2, op) end)
-    hb_preserve = Enum.filter(hb, fn op2 -> total_before_op?(op2, op) end)
-    undo_redo_op_helper(document, hb_redo, op, hb_preserve)
-  end
-
-  defp undo_redo_op_helper(document, hb, op, hb_preserve) do
     cond do
-      hb == [] ->
+      hb == [] || total_before_op?(hd(hb), op) ->
         {document, op} = do_op(document, op)
-        {document, [op | hb_preserve]}
+        {document, [op | hb]}
 
       true ->
         op2 = hd(hb)
