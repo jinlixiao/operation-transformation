@@ -10,6 +10,7 @@ defmodule OT do
 
   require Fuzzers
   require Logger
+  require Transform
 
   defstruct(
     # The list of current proceses.
@@ -168,6 +169,9 @@ defmodule OT do
       :delete ->
         {document, deleted} = delete(document, elem(op, 4))
         {document, put_elem(op, 3, deleted)}
+
+      :identity ->
+        {document, op}
     end
   end
 
@@ -182,19 +186,28 @@ defmodule OT do
 
       :delete ->
         {insert(document, elem(op, 3), elem(op, 4)), op}
+
+      :identity ->
+        {document, op}
     end
   end
 
   # Return true if op1 is totally before op2, false otherwise
+  @spec total_before_op?(any(), any()) :: boolean()
   defp total_before_op?(op1, op2) do
     get_total_order(elem(op1, 0), elem(op1, 1), elem(op2, 0), elem(op2, 1)) == :before
   end
 
   # The Undo/Redo algorithm. When a new operation op is causally ready,
   # the following steps are executed:
-  #  1. UNDO operations in HB which totally follow op to restore the document before their execution
+  #  1. UNDO operations in HB which totally follow op to restore the document
+  #     before their execution
   #  2. DO op
   #  3. REDO all operations that were undone from HB
+  #
+  # The implementation relies on one important invariant: operations in
+  # HB are sorted according to their total order.
+  @spec undo_redo_op(String.t(), list(), any()) :: {String.t(), list()}
   defp undo_redo_op(document, hb, op) do
     cond do
       hb == [] || total_before_op?(hd(hb), op) ->
