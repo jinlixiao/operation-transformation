@@ -1,6 +1,8 @@
 defmodule Transform do
   # Operation Transformation Functions
 
+  require Clock
+
   # The following functions deals with `op`, which is a tuple of the form:
   #  {clock, site, operation, text, index}
   #  - clock      (index 0): the vector clock of the operation; a map.
@@ -24,8 +26,17 @@ defmodule Transform do
   #        in hb[k+1, m] which are causally proceeding op. Let EOL' be the
   #        list of operations of the corresponding form of EOL at the time of
   #        op's generation. Return list_it(list_et(op, EOL'), hb[k, m]).
+  #  preconditions:
+  #   - op is causallyr eady
+  #   - hb is a history buffer with events ordered from newest to oldest
   def got(op, hb) do
     # TODO: implement this function
+    reverse_hb = Enum.reverse(hb)
+
+    # case Enum.find(reverse_hb, fn eop ->  end) do
+    #   nil -> op
+    #   eop -> got_2(op, eop, hb)
+    # end
   end
 
   # Inclusion transformation function
