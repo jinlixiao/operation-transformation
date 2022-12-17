@@ -58,7 +58,7 @@ defmodule Clock do
   end
 
   # Increment the clock of a site.
-  @spec tick(map(), integer()) :: map
+  @spec tick(map(), atom()) :: map
   def tick(clock, site) do
     Map.update(clock, site, 0, fn v -> v + 1 end)
   end

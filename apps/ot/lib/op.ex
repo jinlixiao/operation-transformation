@@ -30,6 +30,11 @@ defmodule OP do
     }
   end
 
+  @spec exec_op(String.t(), [%OP{}], %OP{}) :: {String.t(), [%OP{}]}
+  def exec_op(document, hb, op) do
+    undo_redo_op(document, hb, op)
+  end
+
   # The Undo/Redo algorithm. When a new operation op is causally ready,
   # the following steps are executed:
   #  1. UNDO operations in HB which totally follow op to restore the document
@@ -39,7 +44,7 @@ defmodule OP do
   #
   # The implementation relies on one important invariant: operations in
   # HB are sorted according to their total order.
-  @spec undo_redo_op(String.t(), list(), any()) :: {String.t(), list()}
+  @spec undo_redo_op(String.t(), [%OP{}], %OP{}) :: {String.t(), [%OP{}]}
   def undo_redo_op(document, hb, op) do
     cond do
       hb == [] || total_before_op?(hd(hb), op) ->
@@ -58,15 +63,15 @@ defmodule OP do
   # Do an operation on a document.
   # Returns the new document and the operation.
   # If the operation is a :delete operation, the deleted character is stored.
-  @spec do_op(String.t(), any()) :: {String.t(), any()}
+  @spec do_op(String.t(), %OP{}) :: {String.t(), %OP{}}
   defp do_op(document, op) do
-    case elem(op, 2) do
+    case op.operation do
       :insert ->
-        {insert(document, elem(op, 3), elem(op, 4)), op}
+        {insert(document, op.text, op.index), op}
 
       :delete ->
-        {document, deleted} = delete(document, elem(op, 4))
-        {document, put_elem(op, 3, deleted)}
+        {document, deleted} = delete(document, op.index)
+        {document, %OP{op | text: deleted}}
 
       :identity ->
         {document, op}
@@ -75,15 +80,15 @@ defmodule OP do
 
   # Undo an operation on a document.
   # Returns the new document and the operation.
-  @spec undo_op(String.t(), any()) :: {String.t(), any()}
+  @spec undo_op(String.t(), %OP{}) :: {String.t(), %OP{}}
   defp undo_op(document, op) do
-    case elem(op, 2) do
+    case op.operation do
       :insert ->
-        {document, _} = delete(document, elem(op, 4))
+        {document, _} = delete(document, op.index)
         {document, op}
 
       :delete ->
-        {insert(document, elem(op, 3), elem(op, 4)), op}
+        {insert(document, op.text, op.index), op}
 
       :identity ->
         {document, op}
@@ -91,9 +96,9 @@ defmodule OP do
   end
 
   # Return true if op1 is totally before op2, false otherwise
-  @spec total_before_op?(any(), any()) :: boolean()
+  @spec total_before_op?(%OP{}, %OP{}) :: boolean()
   defp total_before_op?(op1, op2) do
-    Clock.get_total_order(elem(op1, 0), elem(op1, 1), elem(op2, 0), elem(op2, 1)) == :before
+    Clock.get_total_order(op1.clock, op1.site, op2.clock, op2.site) == :before
   end
 
   # The following functions are used to manipulate the document.

@@ -24,7 +24,12 @@ defmodule OT do
     hb: nil
   )
 
-  @spec new_configuration([atom()]) :: %OT{}
+  @spec new_configuration(any) :: %OT{
+          clock: map(),
+          document: String.t(),
+          hb: [%OP{}],
+          view: [atom()]
+        }
   def new_configuration(view) do
     %OT{
       view: view,
@@ -44,62 +49,25 @@ defmodule OT do
     |> Enum.map(fn x -> send(x, message) end)
   end
 
-  # Update clock value for a given site.
-  @spec tick(%OT{}, atom()) :: %OT{}
-  defp tick(configuration, site) do
-    %OT{configuration | clock: Clock.tick(configuration.clock, site)}
-  end
-
   # Check if an received operation is ready to be executed.
   #  * configuration: the current configuration.
   #  * clock: the clock of the received operation.
   #  * site: the generation site of the received operation.
-  @spec casually_ready?(%OT{}, map(), atom()) :: boolean()
-  defp casually_ready?(configuration, clock, site) do
+  @spec casually_ready?(%OT{}, %OP{}) :: boolean()
+  defp casually_ready?(configuration, op) do
+    site = op.site
+    clock = op.clock
+
     configuration.clock[site] + 1 == clock[site] and
       configuration.view
       |> Enum.filter(fn x -> x != site end)
       |> Enum.all?(fn x -> configuration.clock[x] >= clock[x] end)
   end
 
-  # Execute an insert operation. The operation needed to be causally ready.
-  defp exec_insert(configuration, clock, site, text, index) do
-    IO.puts(
-      "#{whoami()}: Executing insert '#{text}' at index #{index} with clock #{inspect(clock)}"
-    )
-
-    {document, hb} =
-      OP.undo_redo_op(
-        configuration.document,
-        configuration.hb,
-        {clock, site, :insert, text, index}
-      )
-
-    configuration = %OT{configuration | document: document, hb: hb}
-    tick(configuration, site)
-  end
-
-  # Execute a delete operation. The operation needed to be causally ready.
-  defp exec_delete(configuration, clock, site, index) do
-    IO.puts("#{whoami()}: Executing delete at index #{index} with clock #{inspect(clock)}")
-
-    {document, hb} =
-      OP.undo_redo_op(configuration.document, configuration.hb, {clock, site, :delete, "", index})
-
-    configuration = %OT{configuration | document: document, hb: hb}
-    tick(configuration, site)
-  end
-
-  defp gen_insert(configuration, text, index) do
-    op_clock = tick(configuration, whoami()).clock
-    broadcast(configuration, {:insert, op_clock, whoami(), text, index})
-    op_clock
-  end
-
-  defp gen_delete(configuration, index) do
-    op_clock = tick(configuration, whoami()).clock
-    broadcast(configuration, {:delete, op_clock, whoami(), index})
-    op_clock
+  defp execute_op(configuration, op) do
+    {document, hb} = OP.exec_op(configuration.document, configuration.hb, op)
+    clock = Clock.tick(configuration.clock, op.site)
+    %OT{configuration | document: document, hb: hb, clock: clock}
   end
 
   @doc """
@@ -114,57 +82,39 @@ defmodule OT do
           "#{whoami()}: Received insert req from client, inserting #{text} at index #{index}"
         )
 
-        op_clock = gen_insert(configuration, text, index)
-        configuration = exec_insert(configuration, op_clock, whoami(), text, index)
+        op = OP.new(Clock.tick(configuration.clock, whoami()), whoami(), :insert, text, index)
+        broadcast(configuration, op)
+        configuration = execute_op(configuration, op)
         loop(configuration)
 
       {_sender, {:delete_client, index, _clock}} ->
         IO.puts("#{whoami()}: Received delete req from client, deleting at index #{index}")
 
-        op_clock = gen_delete(configuration, index)
-        configuration = exec_delete(configuration, op_clock, whoami(), index)
+        op = OP.new(Clock.tick(configuration.clock, whoami()), whoami(), :delete, "", index)
+        broadcast(configuration, op)
+        configuration = execute_op(configuration, op)
         loop(configuration)
 
       # Messages from other processes.
-      {sender, {:insert, clock, site, text, index}} ->
-        IO.puts(
-          "#{whoami()}: Received insert req from #{sender}, inserting '#{text}' at index #{index} with SV #{inspect(clock)}"
-        )
-
-        if casually_ready?(configuration, clock, site) do
-          configuration = exec_insert(configuration, clock, site, text, index)
+      {_sender, %OP{} = op} ->
+        if casually_ready?(configuration, op) do
+          configuration = execute_op(configuration, op)
           loop(configuration)
         else
-          send(whoami(), {:insert, clock, site, text, index})
-          loop(configuration)
-        end
-
-      {sender, {:delete, clock, site, index}} ->
-        IO.puts(
-          "#{whoami()}: Received delete req from #{sender}, deleting at index #{index} with SV #{inspect(clock)}"
-        )
-
-        if casually_ready?(configuration, clock, site) do
-          configuration = exec_delete(configuration, clock, site, index)
-          loop(configuration)
-        else
-          send(whoami(), {:delete, clock, site, index})
+          send(whoami(), op)
           loop(configuration)
         end
 
       # Messages for debugging
       {sender, :send_document} ->
-        IO.puts("#{whoami()}: Sending document...")
         send(sender, configuration.document)
         loop(configuration)
 
       {sender, :send_clock} ->
-        IO.puts("#{whoami()}: Sending clock...")
         send(sender, configuration.clock)
         loop(configuration)
 
       {sender, :send_state} ->
-        IO.puts("#{whoami()}: Sending state...")
         send(sender, {configuration.document, configuration.clock})
         loop(configuration)
     end
