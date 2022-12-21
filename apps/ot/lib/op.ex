@@ -1,5 +1,6 @@
 defmodule OP do
   # This module deals with operations.
+  import Emulation, only: [whoami: 0]
 
   # The following functions deals with `op`, which is a tuple of the form:
   #  {clock, site, operation, text, index}
@@ -17,7 +18,8 @@ defmodule OP do
     site: nil,
     operation: nil,
     text: "",
-    index: 0
+    index: 0,
+    base_ops: nil
   )
 
   @spec new(map(), atom(), atom(), String.t(), integer()) :: %OP{
@@ -33,14 +35,15 @@ defmodule OP do
       site: site,
       operation: operation,
       text: text,
-      index: index
+      index: index,
+      base_ops: MapSet.new()
     }
   end
 
   @spec exec_op(String.t(), [%OP{}], %OP{}) :: {String.t(), [%OP{}]}
   def exec_op(document, hb, op) do
-    undo_redo_op(document, hb, op)
-    # transform_undo_redo_op(document, hb, op)
+    # undo_redo_op(document, hb, op)
+    transform_undo_redo_op(document, hb, op)
   end
 
   # The Undo/Transform-do/Transform-redo algorithm.
@@ -61,16 +64,20 @@ defmodule OP do
     cond do
       hb == [] || total_before_op?(hd(hb), op) ->
         eop = Transform.got(op, hb)
-        {document, eop} = do_op(document, eop)
+        # IO.puts("#{whoami()}: Transforming #{inspect(op)} into #{inspect(eop)} via GOT")
+        document = do_op(document, eop)
         {document, [eop | hb], [eop], []}
 
       true ->
         op2 = hd(hb)
-        {document, op2} = undo_op(document, op2)
+        document = undo_op(document, op2)
+        # IO.puts("#{whoami()}: Undoing #{inspect(op2)}, result: #{document}")
         {document, new_hb, eos, hbm} = transform_undo_redo_op_helper(document, tl(hb), op)
         eop2 = Transform.list_et(op2, hbm)
         eop2 = Transform.list_it(eop2, eos)
-        {document, op2} = do_op(document, op2)
+        # IO.puts("#{whoami()}: hbm: #{inspect(hbm)}, eos: #{inspect(eos)}")
+        # IO.puts("#{whoami()}: Transforming #{inspect(op2)} into #{inspect(eop2)}")
+        document = do_op(document, eop2)
         {document, [eop2 | new_hb], eos ++ [eop2], [op2 | hbm]}
     end
   end
@@ -88,14 +95,14 @@ defmodule OP do
   def undo_redo_op(document, hb, op) do
     cond do
       hb == [] || total_before_op?(hd(hb), op) ->
-        {document, op} = do_op(document, op)
+        document = do_op(document, op)
         {document, [op | hb]}
 
       true ->
         op2 = hd(hb)
-        {document, op2} = undo_op(document, op2)
+        document = undo_op(document, op2)
         {document, new_hb} = undo_redo_op(document, tl(hb), op)
-        {document, op2} = do_op(document, op2)
+        document = do_op(document, op2)
         {document, [op2 | new_hb]}
     end
   end
@@ -103,35 +110,33 @@ defmodule OP do
   # Do an operation on a document.
   # Returns the new document and the operation.
   # If the operation is a :delete operation, the deleted character is stored.
-  @spec do_op(String.t(), %OP{}) :: {String.t(), %OP{}}
+  @spec do_op(String.t(), %OP{}) :: String.t()
   defp do_op(document, op) do
     case op.operation do
       :insert ->
-        {insert(document, op.text, op.index), op}
+        insert(document, op.text, op.index)
 
       :delete ->
-        {document, deleted} = delete(document, op.index)
-        {document, %OP{op | text: deleted}}
+        delete(document, op.index)
 
       :identity ->
-        {document, op}
+        document
     end
   end
 
   # Undo an operation on a document.
   # Returns the new document and the operation.
-  @spec undo_op(String.t(), %OP{}) :: {String.t(), %OP{}}
+  @spec undo_op(String.t(), %OP{}) :: String.t()
   defp undo_op(document, op) do
     case op.operation do
       :insert ->
-        {document, _} = delete(document, op.index)
-        {document, op}
+        delete(document, op.index)
 
       :delete ->
-        {insert(document, op.text, op.index), op}
+        insert(document, op.text, op.index)
 
       :identity ->
-        {document, op}
+        document
     end
   end
 
@@ -154,10 +159,22 @@ defmodule OP do
 
   # Delete a character at a given index.
   # Here we use a naive implementation of string concatenation.
-  @spec delete(String.t(), integer()) :: {String.t(), String.t()}
+  @spec delete(String.t(), integer()) :: String.t()
   defp delete(document, index) do
     {head, tail} = String.split_at(document, index)
     res = head <> String.slice(tail, 1..String.length(tail)//1)
-    {res, String.at(tail, 0)}
+    res
+  end
+end
+
+defimpl Inspect, for: OP do
+  def inspect(op, _opts) do
+    clock = " #{Map.get(op.clock, :a)},#{Map.get(op.clock, :c)}"
+
+    case op.operation do
+      :insert -> "insert(:#{op.site}, '#{op.text}', #{op.index})" <> clock
+      :delete -> "delete(:#{op.site}, #{op.index})" <> clock
+      :identity -> "identity()" <> clock
+    end
   end
 end
