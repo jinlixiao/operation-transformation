@@ -20,6 +20,13 @@ defmodule OP do
     index: 0
   )
 
+  @spec new(map(), atom(), atom(), String.t(), integer()) :: %OP{
+          clock: map(),
+          index: integer(),
+          operation: atom(),
+          site: atom(),
+          text: String.t()
+        }
   def new(clock, site, operation, text, index) do
     %OP{
       clock: clock,
@@ -33,6 +40,39 @@ defmodule OP do
   @spec exec_op(String.t(), [%OP{}], %OP{}) :: {String.t(), [%OP{}]}
   def exec_op(document, hb, op) do
     undo_redo_op(document, hb, op)
+    # transform_undo_redo_op(document, hb, op)
+  end
+
+  # The Undo/Transform-do/Transform-redo algorithm.
+  # Given a new causally ready operation op and hb = [eo1, ..., eom, ..., eon],
+  # the following steps are executed:
+  #  1. UNDO operations in hb which totally follow op to restore the document
+  #     before their execution
+  #  2. TRANSFORM op into eop by applying GOT control algorithm, and DO eop
+  #  3. TRANSFORM each operation eo in hb[m+1, n] into new execution form eo'
+  #     and then redo
+  @spec transform_undo_redo_op(String.t(), [%OP{}], %OP{}) :: {String.t(), [%OP{}]}
+  def transform_undo_redo_op(document, hb, op) do
+    {document, hb, _, _} = transform_undo_redo_op_helper(document, hb, op)
+    {document, hb}
+  end
+
+  defp transform_undo_redo_op_helper(document, hb, op) do
+    cond do
+      hb == [] || total_before_op?(hd(hb), op) ->
+        eop = Transform.got(op, hb)
+        {document, eop} = do_op(document, eop)
+        {document, [eop | hb], [eop], []}
+
+      true ->
+        op2 = hd(hb)
+        {document, op2} = undo_op(document, op2)
+        {document, new_hb, eos, hbm} = transform_undo_redo_op_helper(document, tl(hb), op)
+        eop2 = Transform.list_et(op2, hbm)
+        eop2 = Transform.list_it(eop2, eos)
+        {document, op2} = do_op(document, op2)
+        {document, [eop2 | new_hb], eos ++ [eop2], [op2 | hbm]}
+    end
   end
 
   # The Undo/Redo algorithm. When a new operation op is causally ready,

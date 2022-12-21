@@ -10,8 +10,6 @@ defmodule OT do
 
   require Fuzzers
   require Logger
-  require Transform
-  require Clock
 
   defstruct(
     # The list of current proceses.
@@ -64,6 +62,7 @@ defmodule OT do
       |> Enum.all?(fn x -> configuration.clock[x] >= clock[x] end)
   end
 
+  @spec execute_op(%OT{}, %OP{}) :: %OT{}
   defp execute_op(configuration, op) do
     {document, hb} = OP.exec_op(configuration.document, configuration.hb, op)
     clock = Clock.tick(configuration.clock, op.site)
@@ -77,23 +76,33 @@ defmodule OT do
   def loop(configuration) do
     receive do
       # Messages from editor cleints.
-      {_sender, {:insert_client, text, index, _clock}} ->
+      {_sender, {:insert_client, text, index, clock}} ->
         IO.puts(
           "#{whoami()}: Received insert req from client, inserting #{text} at index #{index}"
         )
 
-        op = OP.new(Clock.tick(configuration.clock, whoami()), whoami(), :insert, text, index)
-        broadcast(configuration, op)
-        configuration = execute_op(configuration, op)
-        loop(configuration)
+        if index > String.length(configuration.document) do
+          send(whoami(), {:insert_client, text, index, clock})
+          loop(configuration)
+        else
+          op = OP.new(Clock.tick(configuration.clock, whoami()), whoami(), :insert, text, index)
+          broadcast(configuration, op)
+          configuration = execute_op(configuration, op)
+          loop(configuration)
+        end
 
-      {_sender, {:delete_client, index, _clock}} ->
+      {_sender, {:delete_client, index, clock}} ->
         IO.puts("#{whoami()}: Received delete req from client, deleting at index #{index}")
 
-        op = OP.new(Clock.tick(configuration.clock, whoami()), whoami(), :delete, "", index)
-        broadcast(configuration, op)
-        configuration = execute_op(configuration, op)
-        loop(configuration)
+        if index > String.length(configuration.document) do
+          send(whoami(), {:delete_client, index, clock})
+          loop(configuration)
+        else
+          op = OP.new(Clock.tick(configuration.clock, whoami()), whoami(), :delete, "", index)
+          broadcast(configuration, op)
+          configuration = execute_op(configuration, op)
+          loop(configuration)
+        end
 
       # Messages from other processes.
       {_sender, %OP{} = op} ->
