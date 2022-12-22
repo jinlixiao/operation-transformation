@@ -65,11 +65,12 @@ defmodule OT do
   @spec execute_op(%OT{}, %OP{}) :: %OT{}
   defp execute_op(configuration, op) do
     IO.puts(
-      "#{whoami()}: Executing op #{inspect(op)} with document #{inspect(configuration.document)}"
+      "#{whoami()}: Received op #{inspect(op)} with document #{inspect(configuration.document)}"
     )
 
     {document, hb} = OP.exec_op(configuration.document, configuration.hb, op)
     clock = Clock.tick(configuration.clock, op.site)
+    IO.puts("#{whoami()}: New document: #{inspect(document)}, #{inspect(hb)}\n")
     %OT{configuration | document: document, hb: hb, clock: clock}
   end
 

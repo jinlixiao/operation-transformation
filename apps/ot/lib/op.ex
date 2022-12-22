@@ -64,20 +64,22 @@ defmodule OP do
     cond do
       hb == [] || total_before_op?(hd(hb), op) ->
         eop = Transform.got(op, hb)
-        # IO.puts("#{whoami()}: Transforming #{inspect(op)} into #{inspect(eop)} via GOT")
+        IO.puts("#{whoami()}: Transformed #{inspect(op)} into #{inspect(eop)} via GOT")
         document = do_op(document, eop)
+        IO.puts("#{whoami()}: Doing #{inspect(eop)}, result: '#{document}'")
         {document, [eop | hb], [eop], []}
 
       true ->
         op2 = hd(hb)
         document = undo_op(document, op2)
-        # IO.puts("#{whoami()}: Undoing #{inspect(op2)}, result: #{document}")
+        IO.puts("#{whoami()}: Undoing #{inspect(op2)}, result: '#{document}'")
         {document, new_hb, eos, hbm} = transform_undo_redo_op_helper(document, tl(hb), op)
         eop2 = Transform.list_et(op2, hbm)
         eop2 = Transform.list_it(eop2, eos)
-        # IO.puts("#{whoami()}: hbm: #{inspect(hbm)}, eos: #{inspect(eos)}")
-        # IO.puts("#{whoami()}: Transforming #{inspect(op2)} into #{inspect(eop2)}")
+        IO.puts("#{whoami()}: hbm: #{inspect(hbm)}, eos: #{inspect(eos)}")
+        IO.puts("#{whoami()}: Transformed #{inspect(op2)} into #{inspect(eop2)}")
         document = do_op(document, eop2)
+        IO.puts("#{whoami()}: Doing #{inspect(op2)}, result: '#{document}'")
         {document, [eop2 | new_hb], eos ++ [eop2], [op2 | hbm]}
     end
   end
@@ -169,11 +171,12 @@ end
 
 defimpl Inspect, for: OP do
   def inspect(op, _opts) do
-    clock = " #{Map.get(op.clock, :a)},#{Map.get(op.clock, :c)}"
+    # clock = "#{op.clock.a},#{op.clock.b},#{op.clock.c}"
+    clock = ""
 
     case op.operation do
       :insert -> "insert(:#{op.site}, '#{op.text}', #{op.index})" <> clock
-      :delete -> "delete(:#{op.site}, #{op.index})" <> clock
+      :delete -> "delete(:#{op.site}, '#{op.text}', #{op.index})" <> clock
       :identity -> "identity()" <> clock
     end
   end

@@ -125,7 +125,6 @@ defmodule OTTest do
       spawn(:client, fn ->
         view = [:a, :b, :c]
         client_a = OT.Client.new_client(:a)
-        client_b = OT.Client.new_client(:b)
         client_c = OT.Client.new_client(:c)
         OT.Client.insert(client_a, "a", 0, Map.new(view, fn x -> {x, 0} end))
         OT.Client.delete(client_a, 0, Map.new(view, fn x -> {x, 0} end))
@@ -268,6 +267,90 @@ defmodule OTTest do
           end)
 
         assert Enum.all?(documents, fn x -> x == hd(documents) end)
+      end)
+
+    handle = Process.monitor(client)
+    # Timeout.
+    receive do
+      {:DOWN, ^handle, _, _, _} -> true
+    after
+      30_000 -> assert false
+    end
+  after
+    Emulation.terminate()
+  end
+
+  test "intention preservation I" do
+    Emulation.init()
+
+    base_config = OT.new_configuration([:a, :b])
+
+    spawn(:a, fn -> OT.loop(base_config) end)
+
+    client =
+      spawn(:client, fn ->
+        send(:a, OP.new(%{a: 1, b: 0}, :a, :insert, "a", 0))
+        send(:a, OP.new(%{a: 2, b: 0}, :a, :delete, "a", 0))
+        send(:a, OP.new(%{a: 1, b: 1}, :b, :insert, "b", 0))
+        send(:a, OP.new(%{a: 1, b: 2}, :b, :delete, "b", 0))
+
+        send(:a, :send_document)
+
+        document =
+          receive do
+            {:a, document} -> document
+          end
+
+        assert document == ""
+      end)
+
+    handle = Process.monitor(client)
+    # Timeout.
+    receive do
+      {:DOWN, ^handle, _, _, _} -> true
+    after
+      30_000 -> assert false
+    end
+  after
+    Emulation.terminate()
+  end
+
+  test "intention preservation II" do
+    Emulation.init()
+
+    base_config = OT.new_configuration([:a, :b, :c])
+
+    spawn(:a, fn -> OT.loop(base_config) end)
+
+    client =
+      spawn(:client, fn ->
+        # ""
+        send(:a, OP.new(%{a: 1, b: 0, c: 0}, :a, :insert, "a", 0))
+        # "a"
+        send(:a, OP.new(%{a: 0, b: 0, c: 1}, :c, :insert, "c", 0))
+        # "ac"
+        send(:a, OP.new(%{a: 2, b: 0, c: 1}, :a, :delete, "a", 0))
+        # "c"
+        send(:a, OP.new(%{a: 0, b: 1, c: 0}, :b, :insert, "b", 0))
+        # "bc"
+        send(:a, OP.new(%{a: 0, b: 1, c: 2}, :c, :insert, "d", 1))
+        # "bdc"
+        send(:a, OP.new(%{a: 3, b: 1, c: 2}, :a, :insert, "e", 1))
+        # "bedc"
+        send(:a, OP.new(%{a: 4, b: 1, c: 2}, :a, :delete, "e", 1))
+        # "bdc"
+        send(:a, OP.new(%{a: 1, b: 1, c: 3}, :c, :delete, "a", 0))
+        # "bdc"
+        send(:a, OP.new(%{a: 1, b: 2, c: 0}, :b, :insert, "g", 1))
+        # "bgdc"
+        send(:a, :send_document)
+
+        document =
+          receive do
+            {:a, document} -> document
+          end
+
+        assert document == "bgdc"
       end)
 
     handle = Process.monitor(client)

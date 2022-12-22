@@ -49,7 +49,11 @@ defmodule Transform do
     IO.puts("#{whoami()}: running got3, op: #{inspect(op)}, hbk: #{inspect(hbk)}")
     eolp = get_eolp(op, tl(hbk), [hd(hbk)], [])
     IO.puts("#{whoami()}: eolp: #{inspect(eolp)}")
-    list_it(list_et(op, Enum.reverse(eolp)), hbk)
+    op = list_et(op, Enum.reverse(eolp))
+    IO.puts("#{whoami()}: op: #{inspect(op)}")
+    op = list_it(op, hbk)
+    IO.puts("#{whoami()}: op: #{inspect(op)}")
+    op
   end
 
   # preconditions:
@@ -147,8 +151,14 @@ defmodule Transform do
   @spec it_ii(%OP{}, %OP{}) :: %OP{}
   defp it_ii(op1, op2) do
     cond do
-      op1.index < op2.index -> op1
-      op1.index >= op2.index -> %OP{op1 | index: op1.index + 1}
+      MapSet.member?(op1.base_ops, op2.clock) ->
+        %OP{op1 | base_ops: MapSet.delete(op1.base_ops, op2.clock)}
+
+      op1.index < op2.index ->
+        op1
+
+      op1.index >= op2.index ->
+        %OP{op1 | index: op1.index + 1}
     end
   end
 
@@ -186,8 +196,14 @@ defmodule Transform do
   @spec et_ii(%OP{}, %OP{}) :: %OP{}
   defp et_ii(op1, op2) do
     cond do
-      op1.index < op2.index -> op1
-      true -> %OP{op1 | index: op1.index - 1}
+      op1.index < op2.index ->
+        op1
+
+      op1.index >= op2.index + 1 ->
+        %OP{op1 | index: op1.index - 1}
+
+      op1.index == op2.index ->
+        %OP{op1 | base_ops: MapSet.put(op1.base_ops, op2.clock)}
     end
   end
 
