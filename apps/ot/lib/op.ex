@@ -1,6 +1,5 @@
 defmodule OP do
   # This module deals with operations.
-  import Emulation, only: [whoami: 0]
 
   # The following functions deals with `op`, which is a tuple of the form:
   #  {clock, site, operation, text, index}
@@ -64,22 +63,16 @@ defmodule OP do
     cond do
       hb == [] || total_before_op?(hd(hb), op) ->
         eop = Transform.got(op, hb)
-        IO.puts("#{whoami()}: Transformed #{inspect(op)} into #{inspect(eop)} via GOT")
         document = do_op(document, eop)
-        IO.puts("#{whoami()}: Doing #{inspect(eop)}, result: '#{document}'")
         {document, [eop | hb], [eop], []}
 
       true ->
         op2 = hd(hb)
         document = undo_op(document, op2)
-        IO.puts("#{whoami()}: Undoing #{inspect(op2)}, result: '#{document}'")
         {document, new_hb, eos, hbm} = transform_undo_redo_op_helper(document, tl(hb), op)
         eop2 = Transform.list_et(op2, hbm)
         eop2 = Transform.list_it(eop2, eos)
-        IO.puts("#{whoami()}: hbm: #{inspect(hbm)}, eos: #{inspect(eos)}")
-        IO.puts("#{whoami()}: Transformed #{inspect(op2)} into #{inspect(eop2)}")
         document = do_op(document, eop2)
-        IO.puts("#{whoami()}: Doing #{inspect(op2)}, result: '#{document}'")
         {document, [eop2 | new_hb], eos ++ [eop2], [op2 | hbm]}
     end
   end

@@ -64,13 +64,8 @@ defmodule OT do
 
   @spec execute_op(%OT{}, %OP{}) :: %OT{}
   defp execute_op(configuration, op) do
-    IO.puts(
-      "#{whoami()}: Received op #{inspect(op)} with document #{inspect(configuration.document)}"
-    )
-
     {document, hb} = OP.exec_op(configuration.document, configuration.hb, op)
     clock = Clock.tick(configuration.clock, op.site)
-    IO.puts("#{whoami()}: New document: #{inspect(document)}, #{inspect(hb)}\n")
     %OT{configuration | document: document, hb: hb, clock: clock}
   end
 
@@ -82,10 +77,6 @@ defmodule OT do
     receive do
       # Messages from editor cleints.
       {_sender, {:insert_client, text, index, clock}} ->
-        # IO.puts(
-        #   "#{whoami()}: Received insert req from client, inserting #{text} at index #{index}"
-        # )
-
         if index > String.length(configuration.document) do
           send(whoami(), {:insert_client, text, index, clock})
           loop(configuration)
@@ -97,8 +88,6 @@ defmodule OT do
         end
 
       {_sender, {:delete_client, index, clock}} ->
-        # IO.puts("#{whoami()}: Received delete req from client, deleting at index #{index}")
-
         if index >= String.length(configuration.document) do
           send(whoami(), {:delete_client, index, clock})
           loop(configuration)
@@ -122,10 +111,6 @@ defmodule OT do
 
       # Messages for debugging
       {sender, :send_document} ->
-        IO.puts(
-          '#{whoami()}: hb: #{inspect(configuration.hb)}, document: #{inspect(configuration.document)}'
-        )
-
         send(sender, configuration.document)
         loop(configuration)
 

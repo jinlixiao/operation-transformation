@@ -1,6 +1,5 @@
 defmodule Transform do
   # Operation Transformation Functions
-  import Emulation, only: [whoami: 0]
 
   # The GOT Control Algorithm
   #   Given a new causally ready operation op and a history buffer
@@ -35,8 +34,6 @@ defmodule Transform do
   # preconditions:
   #  - hbk: hb[k, m], sorted from oldest to newest
   defp got2(op, hbk) do
-    IO.puts("#{whoami()}: running got2, op: #{inspect(op)}, hbk: #{inspect(hbk)}")
-
     case Enum.filter(tl(hbk), &proceeding?(op, &1)) do
       [] -> list_it(op, hbk)
       _ -> got3(op, hbk)
@@ -46,13 +43,9 @@ defmodule Transform do
   # preconditions:
   #  - hbk: hb[k, m], sorted from oldest to newest
   defp got3(op, hbk) do
-    IO.puts("#{whoami()}: running got3, op: #{inspect(op)}, hbk: #{inspect(hbk)}")
     eolp = get_eolp(op, tl(hbk), [hd(hbk)], [])
-    IO.puts("#{whoami()}: eolp: #{inspect(eolp)}")
     op = list_et(op, Enum.reverse(eolp))
-    IO.puts("#{whoami()}: op: #{inspect(op)}")
     op = list_it(op, hbk)
-    IO.puts("#{whoami()}: op: #{inspect(op)}")
     op
   end
 
@@ -165,9 +158,14 @@ defmodule Transform do
   @spec it_id(%OP{}, %OP{}) :: %OP{}
   defp it_id(op1, op2) do
     cond do
-      op1.index <= op2.index -> op1
-      op1.index > op2.index + 1 -> %OP{op1 | index: op1.index - 1}
-      op1.index == op2.index + 1 -> %OP{op1 | base_ops: MapSet.put(op1.base_ops, op2.clock)}
+      op1.index <= op2.index ->
+        op1
+
+      op1.index > op2.index + 1 ->
+        %OP{op1 | index: op1.index - 1}
+
+      op1.index == op2.index + 1 ->
+        %OP{op1 | index: op1.index - 1, base_ops: MapSet.put(op1.base_ops, op2.clock)}
     end
   end
 
@@ -241,11 +239,8 @@ defmodule Transform do
       op1.index < op2.index ->
         op1
 
-      op1.index > op2.index ->
-        %OP{op1 | index: op1.index - 1}
-
-      op1.index == op2.index ->
-        %OP{op1 | operation: :identity, base_ops: MapSet.put(op1.base_ops, op2.clock)}
+      op1.index >= op2.index ->
+        %OP{op1 | index: op1.index + 1}
     end
   end
 
