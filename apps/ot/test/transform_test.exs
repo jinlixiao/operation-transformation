@@ -5,6 +5,11 @@ defmodule TransformTest do
   import Kernel,
     except: [spawn: 3, spawn: 1, spawn_link: 1, spawn_link: 3, send: 2]
 
+  # This file contains the test for the invariant of the transform function.
+  # Specifically, the ET functions should be the inverse of the IT functions.
+  # The clock values of the transformed operations supplied here is simply to
+  # ensure that the clock values are unique for each operation.
+
   test "transform ins with ins" do
     op0 = OP.new(%{a: -1}, :a, :insert, "a", 0)
     op1 = OP.new(%{a: -2}, :a, :insert, "b", 1)

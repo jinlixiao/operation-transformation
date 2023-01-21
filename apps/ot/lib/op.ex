@@ -41,7 +41,6 @@ defmodule OP do
 
   @spec exec_op(String.t(), [%OP{}], %OP{}) :: {String.t(), [%OP{}]}
   def exec_op(document, hb, op) do
-    # undo_redo_op(document, hb, op)
     transform_undo_redo_op(document, hb, op)
   end
 
